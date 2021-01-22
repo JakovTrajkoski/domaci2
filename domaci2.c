@@ -22,9 +22,9 @@
 #define XIL_AXI_TIMER_TCSR_OFFSET	0x0
 #define XIL_AXI_TIMER_TLR_OFFSET		0x4
 #define XIL_AXI_TIMER_TCR_OFFSET		0x8
-#define XIL_AXI_TIMER_TCSR1_OFFSET	0x10
-#define XIL_AXI_TIMER_TLR1_OFFSET		0x14
-#define XIL_AXI_TIMER_TCR1_OFFSET		0x18
+#define XIL_AXI_TIMER1_TCSR_OFFSET	0x10
+#define XIL_AXI_TIMER1_TLR_OFFSET		0x14
+#define XIL_AXI_TIMER1_TCR_OFFSET		0x18
 
 
 #define XIL_AXI_TIMER_CSR_CASC_MASK	0x00000800
@@ -65,10 +65,11 @@ static struct timer_info *tp = NULL;
 static int i_num = 1;
 static int i_cnt = 0;
 
-int br_med = 1;
+u64 vreme = 0;
+unsigned int br_mod = 1;
 
 static irqreturn_t xilaxitimer_isr(int irq,void*dev_id);
-static void setup_and_start_timer(unsigned int milliseconds);
+static void setup_timer(void);
 static int timer_probe(struct platform_device *pdev);
 static int timer_remove(struct platform_device *pdev);
 int timer_open(struct inode *pinode, struct file *pfile);
@@ -111,9 +112,8 @@ MODULE_DEVICE_TABLE(of, timer_of_match);
 static irqreturn_t xilaxitimer_isr(int irq,void*dev_id)		
 {      
 	unsigned int data = 0;
+	unsigned int data1 = 0;
 
-	// Check Timer Counter Value
-	data = ioread32(tp->base_addr + XIL_AXI_TIMER_TCR_OFFSET);
 	printk(KERN_INFO "xilaxitimer_isr: Interrupt %d occurred !\n",i_cnt);
 
 	// Clear Interrupt
@@ -127,8 +127,14 @@ static irqreturn_t xilaxitimer_isr(int irq,void*dev_id)
 	if (i_cnt>=i_num)
 	{
 		printk(KERN_NOTICE "xilaxitimer_isr: All of the interrupts have occurred. Disabling timer\n");
+
+		data1 = ioread32(tp->base_addr + XIL_AXI_TIMER1_TCSR_OFFSET);
+		iowrite32(data1 & ~(XIL_AXI_TIMER_CSR_ENABLE_TMR_MASK),
+			tp->base_addr + XIL_AXI_TIMER1_TCSR_OFFSET);
 		data = ioread32(tp->base_addr + XIL_AXI_TIMER_TCSR_OFFSET);
-		iowrite32(data & ~(XIL_AXI_TIMER_CSR_ENABLE_TMR_MASK), tp->base_addr + XIL_AXI_TIMER_TCSR_OFFSET);
+		iowrite32(data & ~(XIL_AXI_TIMER_CSR_ENABLE_TMR_MASK),
+			tp->base_addr + XIL_AXI_TIMER_TCSR_OFFSET);
+
 		i_cnt = 0;
 	}
 
@@ -137,7 +143,7 @@ static irqreturn_t xilaxitimer_isr(int irq,void*dev_id)
 //***************************************************
 //HELPER FUNCTION THAT RESETS AND STARTS TIMER WITH PERIOD IN MILISECONDS
 
-static void setup_and_start_timer()
+static void setup_timer(void)
 {
 	// Disable Timer Counter
 	unsigned int timer_load0 = 0;
@@ -148,7 +154,7 @@ static void setup_and_start_timer()
 
 	// Disable timer/counter while configuration is in progress
 	data1 = ioread32(tp->base_addr + XIL_AXI_TIMER1_TCSR_OFFSET);
-	iowrite32(data1 & ~(XIL_AXI_TIMER1_CSR_ENABLE_TMR_MASK),
+	iowrite32(data1 & ~(XIL_AXI_TIMER_CSR_ENABLE_TMR_MASK),
 			tp->base_addr + XIL_AXI_TIMER1_TCSR_OFFSET);
 
 
@@ -172,22 +178,49 @@ static void setup_and_start_timer()
 
 
 	data1 = ioread32(tp->base_addr + XIL_AXI_TIMER1_TCSR_OFFSET);
-	iowrite32(data1 & ~(XIL_AXI_TIMER1_CSR_LOAD_MASK),
+	iowrite32(data1 & ~(XIL_AXI_TIMER_CSR_LOAD_MASK),
 			tp->base_addr + XIL_AXI_TIMER1_TCSR_OFFSET);
 	data = ioread32(tp->base_addr + XIL_AXI_TIMER_TCSR_OFFSET);
 	iowrite32(data & ~(XIL_AXI_TIMER_CSR_LOAD_MASK),
 			tp->base_addr + XIL_AXI_TIMER_TCSR_OFFSET);
 
 	// Enable interrupts and autoreload, rest should be zero
-	iowrite32(XIL)AXI_TIMER_CSR_ENABLE_INT_MASK | XIL_AXI_TIMER_CSR_CASC_MASK ,
+	iowrite32(XIL_AXI_TIMER_CSR_ENABLE_INT_MASK | XIL_AXI_TIMER_CSR_CASC_MASK ,
 			tp->base_addr + XIL_AXI_TIMER_TCSR_OFFSET);
+}
 
-	/* Start Timer bz setting enable signal
+static void start_timer(void)
+{
+	unsigned char data;
+	//Start Timer bz setting enable signal
 	data = ioread32(tp->base_addr + XIL_AXI_TIMER_TCSR_OFFSET);
 	iowrite32(data | XIL_AXI_TIMER_CSR_ENABLE_TMR_MASK,
 			tp->base_addr + XIL_AXI_TIMER_TCSR_OFFSET);
-*/
 }
+
+static void reset_timer(void)
+{
+	iowrite32(0, tp->base_addr + XIL_AXI_TIMER1_TCR_OFFSET);
+	iowrite32(0, tp->base_addr + XIL_AXI_TIMER_TCR_OFFSET);
+}
+
+static void stop_timer(void)
+{
+	unsigned int data = 0;
+	unsigned int data1 = 0;
+
+
+	// Disable timer/counter while configuration is in progress
+	data1 = ioread32(tp->base_addr + XIL_AXI_TIMER1_TCSR_OFFSET);
+	iowrite32(data1 & ~(XIL_AXI_TIMER_CSR_ENABLE_TMR_MASK),
+			tp->base_addr + XIL_AXI_TIMER1_TCSR_OFFSET);
+
+
+	data = ioread32(tp->base_addr + XIL_AXI_TIMER_TCSR_OFFSET);
+	iowrite32(data & ~(XIL_AXI_TIMER_CSR_ENABLE_TMR_MASK),
+			tp->base_addr + XIL_AXI_TIMER_TCSR_OFFSET);
+}
+
 
 //***************************************************
 // PROBE AND REMOVE
@@ -294,17 +327,64 @@ int timer_close(struct inode *pinode, struct file *pfile)
 	return 0;
 }
 
+void read_current_time(void)
+{
+	unsigned int data;
+	unsigned int data1;
+
+	data1 = ioread32(tp->base_addr + XIL_AXI_TIMER1_TCR_OFFSET);
+	data = ioread32(tp->base_addr + XIL_AXI_TIMER_TCR_OFFSET);
+	
+	vreme = (u64)data1;
+	vreme <<= 32;
+	vreme += (u64)data;
+}
+
 ssize_t timer_read(struct file *pfile, char __user *buffer, size_t length, loff_t *offset) 
 {
-
+	read_current_time();
+	u64 pom;
+	u64 pom1;
+	u64 pom2;
+	char buff[BUFF_SIZE];
+	long int len = 0;
+	unsigned int sati = 0;
+	unsigned int minuti = 0;
+	unsigned int sekunde = 0;
+	unsigned int milisekunde = 0;
+	unsigned int mikrosekunde = 0;
+	int ret;
 	//printk(KERN_INFO "Succesfully read timer\n");
+
+	pom = div_u64(vreme,100);
+	pom1 = div_u64(pom,1000);
+	pom = pom - pom1*1000;
+	pom2 = div_u64(pom1,1000);
+	pom1 = pom1 - pom1 * 1000;
+	sati = (unsigned int) pom2/(60*60);
+	pom2 = pom2 - sati*(60*60);
+	minuti = (unsigned int) pom2/60;
+	pom2 = pom2 - minuti*(60);
+	sekunde = (unsigned int) pom2;
+	milisekunde = (unsigned int) pom1;
+	mikrosekunde = (unsigned int) pom;
+	 
+	len = scnprintf(buff, BUFF_SIZE, "%u:%u:%u.%u,%u",sati,minuti,sekunde,milisekunde,mikrosekunde);
+	ret = copy_to_user(buffer,buff,len);
+
+	if(ret)
+		return -EFAULT;
+	
+	printk(KERN_INFO "uspesno procitano");
+	
 	return 0;
 }
 
 ssize_t timer_write(struct file *pfile, const char __user *buffer, size_t length, loff_t *offset) 
 {
+	int ret;
 	char buff[BUFF_SIZE];
-	char *mode[6] = {"start","stop","reset"};
+	setup_timer();
 	int i = 0;
 	ret = copy_from_user(buff, buffer, length);
 	if(ret)
@@ -312,17 +392,31 @@ ssize_t timer_write(struct file *pfile, const char __user *buffer, size_t length
 	buff[length] = '\0';
 	
 	int neuspesno = 1;
-	for(i=0;i<3;i++)
-		if(strncmp(mode[i],buff,strlen(buff))==0)
-			{
-				neuspesno = 0;
-				br_mod = i;		
-				printk(KERN_INFO "uspesno uneta vrednost\n");
-			}
-	if(nuspesno)
+	if(strncmp("start",buff,5)==0)
+	{
+		br_mod = 0;
+		printk(KERN_WARNING "start\n");
+		neuspesno = 0;
+	}		
+	if(strncmp("stop",buff,4)==0)
+	{
+		br_mod = 1;
+		printk(KERN_WARNING "stop\n");
+		neuspesno = 0;
+	}		
+	if(strncmp("reset",buff,5)==0)
+	{
+		br_mod = 2;
+		printk(KERN_WARNING "start\n");
+		neuspesno = 0;
+	}		
+	if(neuspesno)
 	{
 		printk(KERN_WARNING "pogresan unos\n");
 	}
+	if(br_mod == 0) start_timer();
+	if(br_mod == 1) stop_timer();
+	if(br_mod == 2)	reset_timer();
 	return length;
 }
 
