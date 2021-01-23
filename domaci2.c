@@ -65,7 +65,6 @@ static struct timer_info *tp = NULL;
 static int i_num = 1;
 static int i_cnt = 0;
 
-u64 vreme = 0;
 unsigned int br_mod = 1;
 
 static irqreturn_t xilaxitimer_isr(int irq,void*dev_id);
@@ -78,6 +77,8 @@ ssize_t timer_read(struct file *pfile, char __user *buffer, size_t length, loff_
 ssize_t timer_write(struct file *pfile, const char __user *buffer, size_t length, loff_t *offset);
 static int __init timer_init(void);
 static void __exit timer_exit(void);
+
+int flag = 0;
 
 struct file_operations my_fops =
 {
@@ -196,12 +197,7 @@ static void start_timer(void)
 	data = ioread32(tp->base_addr + XIL_AXI_TIMER_TCSR_OFFSET);
 	iowrite32(data | XIL_AXI_TIMER_CSR_ENABLE_TMR_MASK,
 			tp->base_addr + XIL_AXI_TIMER_TCSR_OFFSET);
-}
-
-static void reset_timer(void)
-{
-	iowrite32(0, tp->base_addr + XIL_AXI_TIMER1_TCR_OFFSET);
-	iowrite32(0, tp->base_addr + XIL_AXI_TIMER_TCR_OFFSET);
+	printk(KERN_INFO "tajmer je poceo");
 }
 
 static void stop_timer(void)
@@ -219,6 +215,15 @@ static void stop_timer(void)
 	data = ioread32(tp->base_addr + XIL_AXI_TIMER_TCSR_OFFSET);
 	iowrite32(data & ~(XIL_AXI_TIMER_CSR_ENABLE_TMR_MASK),
 			tp->base_addr + XIL_AXI_TIMER_TCSR_OFFSET);
+	printk(KERN_INFO "tajmer je zaustavljen");
+}
+
+static void reset_timer(void)
+{
+	iowrite32(0, tp->base_addr + XIL_AXI_TIMER1_TCR_OFFSET);
+	iowrite32(0, tp->base_addr + XIL_AXI_TIMER_TCR_OFFSET);
+	stop_timer();
+	printk(KERN_INFO "tajmer je resetovan");
 }
 
 
@@ -327,8 +332,9 @@ int timer_close(struct inode *pinode, struct file *pfile)
 	return 0;
 }
 
-void read_current_time(void)
+u64 read_current_time(void)
 {
+	u64 vreme;
 	unsigned int data;
 	unsigned int data1;
 
@@ -338,21 +344,29 @@ void read_current_time(void)
 	vreme = (u64)data1;
 	vreme <<= 32;
 	vreme += (u64)data;
+	return vreme;
 }
 
 ssize_t timer_read(struct file *pfile, char __user *buffer, size_t length, loff_t *offset) 
 {
-	read_current_time();
+	if(flag)
+	{
+		flag=0;
+		return 0;
+	}
+		printk(KERN_INFO "uspeh");
+	u64 vreme;
+	vreme = read_current_time();
 	u64 pom;
 	u64 pom1;
 	u64 pom2;
 	char buff[BUFF_SIZE];
 	long int len = 0;
-	unsigned int sati = 0;
-	unsigned int minuti = 0;
-	unsigned int sekunde = 0;
-	unsigned int milisekunde = 0;
-	unsigned int mikrosekunde = 0;
+	u64 sati = 1;
+	u64 minuti = 2;
+	u64 sekunde = 3;
+	u64 milisekunde = 4;
+	u64 mikrosekunde = 5;
 	int ret;
 	//printk(KERN_INFO "Succesfully read timer\n");
 
@@ -361,23 +375,29 @@ ssize_t timer_read(struct file *pfile, char __user *buffer, size_t length, loff_
 	pom = pom - pom1*1000;
 	pom2 = div_u64(pom1,1000);
 	pom1 = pom1 - pom1 * 1000;
-	sati = (unsigned int) pom2/(60*60);
+	sati = div_u64(pom2,(60*60));
 	pom2 = pom2 - sati*(60*60);
-	minuti = (unsigned int) pom2/60;
+	minuti = div_u64(pom2,60);
 	pom2 = pom2 - minuti*(60);
-	sekunde = (unsigned int) pom2;
-	milisekunde = (unsigned int) pom1;
-	mikrosekunde = (unsigned int) pom;
-	 
-	len = scnprintf(buff, BUFF_SIZE, "%u:%u:%u.%u,%u",sati,minuti,sekunde,milisekunde,mikrosekunde);
+	sekunde = pom2;
+	milisekunde =  pom1;
+	mikrosekunde =  pom;
+	
+	printk(KERN_INFO "USPEH2");
+	len = scnprintf(buff, BUFF_SIZE, "%llu:%llu:%llu.%llu,%llu\n",sati,minuti,sekunde,milisekunde,mikrosekunde);
+
 	ret = copy_to_user(buffer,buff,len);
 
 	if(ret)
+	{
+		printk(KERN_INFO "GRSKA");
 		return -EFAULT;
+	}
 	
 	printk(KERN_INFO "uspesno procitano");
-	
-	return 0;
+
+	flag = 1;	
+	return len;
 }
 
 ssize_t timer_write(struct file *pfile, const char __user *buffer, size_t length, loff_t *offset) 
@@ -407,7 +427,7 @@ ssize_t timer_write(struct file *pfile, const char __user *buffer, size_t length
 	if(strncmp("reset",buff,5)==0)
 	{
 		br_mod = 2;
-		printk(KERN_WARNING "start\n");
+		printk(KERN_WARNING "reset\n");
 		neuspesno = 0;
 	}		
 	if(neuspesno)
